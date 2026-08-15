@@ -2,7 +2,7 @@
 name = "xmip-cluster"
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-cluster"
 description = "Xmip Cluster membership and capability-aware node selection."
 
