@@ -7,5 +7,5 @@ repository = "https://github.com/IlleNilsson/xmip-cluster"
 description = "Xmip Cluster membership and capability-aware node selection."
 
 [dependencies]
-xmip-core = { git = "https://github.com/IlleNilsson/xmip-core", rev = "83f68c482f42a22866902ff7d78e7a3b1d14dcdf" }
+xmip-core = { git = "https://github.com/IlleNilsson/xmip-core", rev = "9adfd1eb4a6a3b5a6b0b6ea9b3a1fb288b41c8fc" }
 xmip-node = { git = "https://github.com/IlleNilsson/xmip-node", rev = "34e7ccc2b8f3358f4b38a1809046fe4c3da49cb6" }
