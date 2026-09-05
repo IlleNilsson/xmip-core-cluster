@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-use xmip_core::{ClusterId, NodeId};
-use xmip_node::Node;
+use node::Node;
+use xcore::{ClusterId, NodeId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Cluster {
