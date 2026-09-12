@@ -1,2 +1,2 @@
-# xmip-cluster
+# xmip-core-cluster
 Xmip Cluster model.
