@@ -12,4 +12,4 @@ time-limited claim through Xmip Storage — decided 2026-10-01 and not built
 here yet.
 
 `doc/architecture/runtime-model.md` section 22 and `deployment-model.md`
-section 9 govern it; `architecture.xmip` carries the maturity.
+section 9 govern it; `architecture.toml` carries the maturity.
