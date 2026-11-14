@@ -6,12 +6,13 @@
 //! it. When the guards give up on one, it and every Event after it stay,
 //! in order, for the next pump: a remote subscriber may see an Event twice
 //! and never misses one while this process runs. The transport is a
-//! [`Wire`]: the HTTP, Kafka and AMQP transports each implement it, carry
-//! the [`xevent::binding::Carried`] the binding wrote where their protocol
-//! puts it, and
-//! present the identity the Send side configured for the subscriber's
-//! Party (ADR-0019 clause 3). Every carried Event and every give-up is
-//! audited in the subscriber's audit.
+//! [`Wire`]: the HTTP, Kafka and AMQP transports each implement it, answer
+//! the rules of their protocol's binding ([`Wire::rules`]) — so an Event
+//! is written by the rules of the wire that carries it, never another's —
+//! carry the [`xevent::binding::Carried`] those rules wrote where their
+//! protocol puts it, and present the identity the Send side configured
+//! for the subscriber's Party (ADR-0019 clause 3). Every carried Event
+//! and every give-up is audited in the subscriber's audit.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
@@ -20,7 +21,7 @@ use std::time::Duration;
 use resilience::{Guard, Guarded, execute};
 use xcore::{PartyId, Severity};
 use xevent::Event;
-use xevent::binding::{Binding, Mode};
+use xevent::binding::Mode;
 use xevent::wire::{Wire, WireEvent};
 
 use crate::delivery::audit_trail::record;
@@ -40,23 +41,18 @@ pub struct Pumped {
 /// A subscription forwarded over a wire.
 pub struct Forwarder<W: Wire> {
     subscription: EventSubscription,
-    binding: Binding,
     mode: Mode,
     wire: W,
     pending: VecDeque<Arc<Event>>,
 }
 
 impl<W: Wire> Forwarder<W> {
+    /// `subscription` forwarded over `wire` in `mode`, by the wire's own
+    /// binding rules.
     #[must_use]
-    pub const fn new(
-        subscription: EventSubscription,
-        binding: Binding,
-        mode: Mode,
-        wire: W,
-    ) -> Self {
+    pub const fn new(subscription: EventSubscription, mode: Mode, wire: W) -> Self {
         Self {
             subscription,
-            binding,
             mode,
             wire,
             pending: VecDeque::new(),
@@ -99,10 +95,12 @@ impl<W: Wire> Forwarder<W> {
         &self.wire
     }
 
-    /// One Event, written by the binding and carried under the guards.
+    /// One Event, written by the wire's binding rules and carried under
+    /// the guards.
     fn attempt(&self, party: PartyId, event: &Event, guards: &[&dyn Guard]) -> Result<(), String> {
         let carried = self
-            .binding
+            .wire
+            .rules()
             .write(&WireEvent::from_event(event), self.mode)
             .map_err(|error| error.to_string())?;
 

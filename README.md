@@ -75,7 +75,10 @@ without the plane (ADR-0065, amendment 2026-11-13).
 - **Over the wire.** `delivery::forward::Forwarder` carries a
   subscription's Events through an `xevent::wire::Wire` — Xmip's own http,
   kafka and amqp transports each implement one — at least once, in order,
-  each attempt judged by the resilience guards.
+  each attempt judged by the resilience guards. Each Event is written by
+  the rules of the wire's own protocol binding (`Wire::rules`; ADR-0065,
+  amendment 2026-11-14), so `Forwarder::new` takes a subscription, a mode
+  and a wire, and no binding.
 - **Operated.** `Hub::standing` lists each open Event subscription as the
   `observe::EventSubscription` a node publishes — node and number,
   subscriber, what it asks for (`Filter::said`), state and its queue's

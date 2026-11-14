@@ -15,7 +15,7 @@ use resilience::Guard;
 use retry::Retry;
 use xcore::{Failure, PartyId};
 use xevent::Event;
-use xevent::binding::{Binding, Carried, Mode};
+use xevent::binding::{Carried, Mode, Rules};
 use xevent::filter::Filter;
 use xevent::outcome::Outcome;
 use xevent::wire::Wire;
@@ -30,10 +30,23 @@ struct FarEnd {
     kept: Mutex<Vec<(PartyId, Carried)>>,
 }
 
+/// The far end's binding: a prefix, and every other rule the default.
+struct Plain;
+
+impl Rules for Plain {
+    fn prefix(&self) -> &'static str {
+        "ev-"
+    }
+}
+
 /// The far end as the forwarder holds it, the test holding it too.
 struct Shared(Arc<FarEnd>);
 
 impl Wire for Shared {
+    fn rules(&self) -> &dyn Rules {
+        &Plain
+    }
+
     fn carry(&self, party: PartyId, carried: &Carried) -> Result<(), Failure> {
         let mut refusing = self.0.refusing.lock().expect("refusing");
         if *refusing > 0 {
@@ -71,12 +84,7 @@ fn an_event_is_kept_until_the_wire_takes_it_and_arrives_in_order() {
         refusing: Mutex::new(3),
         kept: Mutex::new(Vec::new()),
     });
-    let mut forwarder = Forwarder::new(
-        subscription,
-        Binding::Kafka,
-        Mode::Binary,
-        Shared(Arc::clone(&far)),
-    );
+    let mut forwarder = Forwarder::new(subscription, Mode::Binary, Shared(Arc::clone(&far)));
     let scope = format!(
         "{}/send/b",
         configure::fixture::test_cluster().node_scope(0)
@@ -103,7 +111,7 @@ fn an_event_is_kept_until_the_wire_takes_it_and_arrives_in_order() {
         .iter()
         .map(|(to, carried)| {
             assert_eq!(*to, party, "carried to the subscriber's Party");
-            let wire_event = Binding::Kafka.read(carried).expect("a WireEvent");
+            let wire_event = Plain.read(carried).expect("a WireEvent");
             wire_event.id
         })
         .collect();
