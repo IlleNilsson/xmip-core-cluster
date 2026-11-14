@@ -7,11 +7,140 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-cluster"
-description = "Xmip Cluster membership and capability-aware node selection."
+description = "The Xmip Cluster: its members, the placement of work on the nodes whose capability satisfies it, the one rotation every round robin takes, the delivery of Events to the subscribers that asked for them, and the sync plane that links its nodes (ADR-0058, ADR-0065, ADR-0067)."
 
 [dependencies]
+# The error declaration, said once; the lock and the wake the sync plane
+# and the hub wait on.
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+# What a node declares and what work requires of it are node's (ADR-0056):
+# placement matches the two and never reads them again.
 node = { package = "xmip-core-node", git = "https://github.com/IlleNilsson/xmip-core-node", branch = "main" }
+# Delivery's: the Event, the one subscription rule a subscription is held
+# to, the wire form a forwarder writes and the Wire it carries it over.
+xevent = { package = "xmip-core-event", git = "https://github.com/IlleNilsson/xmip-core-event", branch = "main", optional = true }
+# Delivery's: a subscriber is a declared Party, proven as every arrival
+# is, by the identity the authentication gate answered.
+party = { package = "xmip-core-party", git = "https://github.com/IlleNilsson/xmip-core-party", branch = "main", optional = true }
+context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main", optional = true }
+# Delivery's: whether a subscriber may see what it asked for is the
+# authorization gate's decision, asked here and never written again.
+authorize = { package = "xmip-core-authorize", git = "https://github.com/IlleNilsson/xmip-core-authorize", branch = "main", optional = true }
+# Delivery's: what a hub holds is published as observe's records, an
+# operator's acts and their words are observe's Act, and who is unheard
+# is said as observe's Unheard.
+observe = { package = "xmip-core-observe", git = "https://github.com/IlleNilsson/xmip-core-observe", branch = "main", optional = true }
+# Delivery's: at least once over the wire, each attempt decided by the
+# guards (ADR-0065 clause 3).
+resilience = { package = "xmip-core-resilience", git = "https://github.com/IlleNilsson/xmip-core-resilience", branch = "main", optional = true }
+# Delivery's and the sync plane's: every subscription, delivery, refusal
+# and link is recorded in the subscriber's or the node's own audit.
+audit = { package = "xmip-core-audit", git = "https://github.com/IlleNilsson/xmip-core-audit", branch = "main", optional = true }
+# Delivery's: the Event link's frames (`sync::link`). The sync plane's: a
+# link's connect, its watched reading side and the accepting thread's wake.
+net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
+# Delivery's: what a frame of the Event link carries, as JSON.
+serde_json = { version = "1", optional = true }
+# The sync plane's: Xmip's own mutual TLS (ADR-0063), its two directions on
+# two threads (tls::duplex).
+tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
 
+[features]
+# The running part: the sync plane (ADR-0067). configure and persist take
+# the pure part with default-features = false, and no network with it.
+default = ["sync"]
+# Events delivered (ADR-0065): the hub, its subscribers and their gate, an
+# operator's acts, the forwarder, and the Event link's conversation
+# (`sync::link`) the hub keeps its taps and carriers by. It opens no
+# socket: the runtime and the Essentials take it without the plane.
+delivery = [
+    "dep:xevent",
+    "dep:party",
+    "dep:context",
+    "dep:authorize",
+    "dep:observe",
+    "dep:resilience",
+    "dep:audit",
+    "dep:net",
+    "dep:serde_json",
+]
+sync = ["delivery", "dep:tls"]
+# `delivery::subscriber::fixture`: a subscriber built as a proven caller
+# for a test, test support as `configure::fixture` is, which only a
+# dev-dependency turns on — this crate's own tests and the transports'
+# event-wire tests. It keeps a test's helper out of a node's build and
+# guards nothing: any code linked into a process can build a proven
+# identity, and the gate that proves a subscriber is the runtime's
+# (ADR-0019, amendment 2026-11-11).
+test-support = ["delivery"]
+
+# The sync plane over real nodes: the test cluster in this process, and in
+# processes of their own.
+[[test]]
+name = "sync"
+path = "tests/sync.rs"
+required-features = ["sync"]
+
+[[test]]
+name = "sync_process"
+path = "tests/sync_process.rs"
+required-features = ["sync"]
+
+# Delivery in this process: the hub, an operator's acts and the forwarder.
+[[test]]
+name = "hub"
+path = "tests/hub.rs"
+required-features = ["delivery"]
+
+[[test]]
+name = "act"
+path = "tests/act.rs"
+required-features = ["delivery"]
+
+[[test]]
+name = "forward"
+path = "tests/forward.rs"
+required-features = ["delivery"]
+
+# The module's timing program (doc/governance/rust-style.md section 5c): a
+# plain cargo test leaves it out, and the landing runs it after every other
+# test here, alone, one test at a time, so what it measures is Xmip's work.
+[[test]]
+name = "measured"
+path = "tests/measured/main.rs"
+test = false
+required-features = ["sync"]
+
+[dev-dependencies]
+# The crate's own tests subscribe through `delivery::subscriber::fixture`:
+# a dev-dependency on itself is how Cargo turns a feature on for the tests
+# and for nothing else.
+xmip-core-cluster = { path = ".", features = ["test-support"] }
+# The test cluster's names, from its `cluster.xmip` (`configure::fixture`;
+# ADR-0056, amendment 2026-10-03): no test writes a cluster or node name.
+configure = { package = "xmip-core-configure", git = "https://github.com/IlleNilsson/xmip-core-configure", branch = "main", features = ["test-support"] }
+# The latency figures and Xmip's own processor time (`xcore::latency`,
+# `xcore::processor_time`). Test-only.
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main", features = ["test-support"] }
+# One real guard, so the at-least-once test is judged as a node judges it.
+retry = { package = "xmip-core-resilience-retry", git = "https://github.com/IlleNilsson/xmip-core-resilience-retry", branch = "main" }
+# The policy the tests hand a hub, allowing the Parties they subscribe as:
+# the party technology of the authorize capability, never a copy of it.
+authorize-party = { package = "xmip-core-authorize-party", git = "https://github.com/IlleNilsson/xmip-core-authorize-party", branch = "main" }
+# A test cluster's authority and each node's certificate. Test-only.
+rcgen = "0.14"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+too_many_lines = "warn"
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+unwrap_used = "warn"
+expect_used = "allow"
+
+# What this depends on runs optimized in a debug build (rust-style.md 5b).
 [profile.dev.package."*"]
 opt-level = 3
