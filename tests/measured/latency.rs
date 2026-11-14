@@ -8,7 +8,7 @@
 //! mean hides the tail.
 //!
 //! Two things are held, each as the fastest round in every five
-//! (`xcore::latency`): a poll or a busy loop is in every round, a wake that
+//! (`xcore::latency::Rounds`): a poll or a busy loop is in every round, a wake that
 //! waited its turn for a processor in some only. **The wake is a wake**: the
 //! crossing is under the millisecond plus what the machine takes to wake a
 //! thread on a plain channel, three times — the hop wakes three threads
@@ -26,15 +26,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::test_cluster::{Authority, Roster, TestNode, failures, name};
-use xcore::latency::{PlainWake, spread};
+use xcore::latency::{Rounds, spread};
 use xcore::processor_time::ProcessorTime;
 use xevent::outcome::Outcome;
 
 /// How many Events are measured.
 const ROUNDS: usize = 500;
 
-/// The bound: about a millisecond.
-const BOUND: Duration = Duration::from_millis(1);
+/// How many threads the hop wakes where the node's own delivery, and a
+/// plain wake, wake one (`xcore::latency::Rounds`).
+const WAKES: u32 = 3;
 
 #[test]
 fn an_event_crossing_to_another_node_adds_well_under_a_millisecond() {
@@ -44,10 +45,8 @@ fn an_event_crossing_to_another_node_adds_well_under_a_millisecond() {
     TestNode::follow(&[&one, &two]);
     let across = one.subscribe(1, failures());
     let here = two.subscribe(2, failures());
-    let plain = PlainWake::start();
 
-    let (mut crossed, mut own, mut worked) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut woke, mut idle) = (Vec::new(), Vec::new());
+    let (mut rounds, mut own) = (Rounds::crossing(WAKES), Vec::new());
     for _ in 0..ROUNDS {
         thread::sleep(Duration::from_micros(200));
         let from = ProcessorTime::process();
@@ -56,32 +55,16 @@ fn an_event_crossing_to_another_node_adds_well_under_a_millisecond() {
         let delivered = here.next(Duration::from_secs(5), 1);
         own.push(sent.elapsed());
         let heard = across.next(Duration::from_secs(5), 1);
-        crossed.push(sent.elapsed());
-        worked.push(from.elapsed());
+        rounds.took.push(sent.elapsed());
+        rounds.worked.push(from.elapsed());
         assert_eq!((delivered.events.len(), heard.events.len()), (1, 1));
-        let (plain_wake, plain_work) = plain.round();
-        woke.push(plain_wake);
-        idle.push(plain_work);
+        rounds.beside();
     }
 
-    let crossed = spread("raised on the second to a subscriber on the first", crossed);
     let own = spread("raised on the second to a subscriber on itself", own);
-    let usual = spread("a plain channel beside it", woke).fastest_of_five;
-    let worked = spread("the process's processor time for a crossing", worked);
-    let idle = spread("the process's processor time for a plain wake", idle);
+    let crossed = rounds.hold("raised on the second to a subscriber on the first");
     println!(
         "the hop adds about {:?}, the fastest of five",
         crossed.fastest_of_five.saturating_sub(own.fastest_of_five)
-    );
-    assert!(
-        crossed.fastest_of_five < BOUND + usual * 3,
-        "the fastest of five {:?}, the machine's own {usual:?}",
-        crossed.fastest_of_five
-    );
-    assert!(
-        worked.fastest_of_five < BOUND + idle.fastest_of_five,
-        "the process's processor time for a crossing {:?}, for a plain wake {:?}",
-        worked.fastest_of_five,
-        idle.fastest_of_five
     );
 }
