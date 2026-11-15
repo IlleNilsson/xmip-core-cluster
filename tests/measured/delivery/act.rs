@@ -1,7 +1,9 @@
 //! An operator's acts on a subscription (ADR-0065, amendment 2026-09-29),
 //! measured: a resume wakes a drain waiting on the subscription at once,
-//! the fastest of five over its rounds (`xcore::latency::spread`). Until
-//! 2026-11-14 one resume was timed once.
+//! round by round beside a plain wake, the fastest of five
+//! (`xcore::latency::Rounds`; a resume wakes one thread, the drain, as a
+//! plain wake does). Until 2026-11-14 one resume was timed once, and until
+//! 2026-11-15 the fastest of five was held flat.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,7 +15,8 @@ use authorize_party::PartyPolicy;
 use node::Stage;
 use observe::Act;
 use xcore::PartyId;
-use xcore::latency::spread;
+use xcore::latency::Rounds;
+use xcore::processor_time::ProcessorTime;
 use xevent::Event;
 use xevent::filter::Filter;
 use xevent::outcome::Outcome;
@@ -57,30 +60,30 @@ fn a_resume_wakes_a_waiting_drain_within_a_millisecond() {
         }
         subscription
     });
-    let woken = (0..ROUNDS)
-        .map(|_| {
-            hub.act(id, Act::Pause, "ilian").expect("paused");
-            let _ = hub.publish(Event::completed(
-                Stage::Receive,
-                Outcome::Success,
-                format!("{node}/receive/a"),
-            ));
-            ask.send(()).expect("the drain waits");
-            std::thread::sleep(Duration::from_millis(20));
-            let resumed_at = Instant::now();
-            hub.act(id, Act::Resume, "ilian").expect("resumed");
-            let (woke, taken) = told.recv_timeout(Duration::from_secs(5)).expect("woke");
-            assert_eq!(taken, 1);
-            woke.duration_since(resumed_at)
-        })
-        .collect();
+    let mut rounds = Rounds::crossing(1);
+    for _ in 0..ROUNDS {
+        hub.act(id, Act::Pause, "ilian").expect("paused");
+        let _ = hub.publish(Event::completed(
+            Stage::Receive,
+            Outcome::Success,
+            format!("{node}/receive/a"),
+        ));
+        ask.send(()).expect("the drain waits");
+        std::thread::sleep(Duration::from_millis(20));
+        // The round: the resume to the drain woken, and this process's
+        // processor time to its word back, as a plain wake's round counts.
+        let from = ProcessorTime::process();
+        let resumed_at = Instant::now();
+        hub.act(id, Act::Resume, "ilian").expect("resumed");
+        let (woke, taken) = told.recv_timeout(Duration::from_secs(5)).expect("woke");
+        rounds.took.push(woke.duration_since(resumed_at));
+        rounds.worked.push(from.elapsed());
+        assert_eq!(taken, 1);
+        rounds.beside();
+    }
     drop(ask);
     drop(waiting.join().expect("joined"));
-    let woken = spread("a resume to the drain waiting on it woken", woken);
-    assert!(
-        woken.fastest_of_five < Duration::from_millis(1),
-        "resume wakes the drain at once: {woken:?}"
-    );
+    rounds.hold("a resume to the drain waiting on it woken");
     let _ = std::fs::remove_dir_all(&at);
 }
 

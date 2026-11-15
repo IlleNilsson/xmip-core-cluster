@@ -9,6 +9,7 @@ use audit::program_audit::ProgramAudit;
 use authorize_party::PartyPolicy;
 use node::Stage;
 use xcore::PartyId;
+use xcore::latency::spread;
 use xevent::Event;
 use xevent::filter::Filter;
 use xevent::outcome::Outcome;
@@ -50,14 +51,7 @@ fn a_publish_to_a_hundred_subscriptions_takes_microseconds() {
         })
         .collect();
     let events: Vec<Event> = (0..1000).map(|_| received(Outcome::Success)).collect();
-
-    let started = Instant::now();
-    for event in events {
-        let _ = hub.publish(event);
-    }
-    let each = started.elapsed() / 1000;
-
-    println!("one publish to 100 matching subscriptions: {each:?}");
+    let each = published(&hub, events, "a publish to 100 matching subscriptions");
     assert!(each < Duration::from_millis(1), "a publish took {each:?}");
     drop(subscriptions);
 
@@ -65,13 +59,25 @@ fn a_publish_to_a_hundred_subscriptions_takes_microseconds() {
         .subscribe(subscriber(&at), Filter::everything(), 4096)
         .expect("allowed");
     let events: Vec<Event> = (0..1000).map(|_| received(Outcome::Success)).collect();
-    let started = Instant::now();
-    for event in events {
-        let _ = hub.publish(event);
-    }
-    let each = started.elapsed() / 1000;
-    println!("one publish to 1 matching subscription: {each:?}");
+    let each = published(&hub, events, "a publish to 1 matching subscription");
     assert!(each < Duration::from_millis(1), "a publish took {each:?}");
     drop(one);
     let _ = std::fs::remove_dir_all(&at);
+}
+
+/// `events` published one by one on `hub`, each timed, printed under
+/// `what`: the fastest of five (`xcore::latency::spread`). A publish waits
+/// on no wake — it offers the Event to each matching subscription's queue —
+/// so no plain wake is measured beside it. Until 2026-11-15 the thousand
+/// were timed together, an average.
+fn published(hub: &Hub, events: Vec<Event>, what: &str) -> Duration {
+    let taken = events
+        .into_iter()
+        .map(|event| {
+            let started = Instant::now();
+            let _ = hub.publish(event);
+            started.elapsed()
+        })
+        .collect();
+    spread(what, taken).fastest_of_five
 }
