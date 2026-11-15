@@ -155,9 +155,12 @@ about a millisecond of being published. The module's timing program,
 `tests/measured`, run after the other tests alone and one test at a time
 (`doc/governance/rust-style.md` section 5c), holds it:
 `delivery/latency.rs` measures publish to receipt, drained and called
-back, and asserts it; `delivery/hub.rs` what a publish costs the
-publisher; `delivery/act.rs` how soon a resume wakes a waiting drain; and
-`latency.rs` what crossing to another node adds. Measured on the owner's
+back; `delivery/hub.rs` what a publish costs the publisher;
+`delivery/act.rs` how soon a resume wakes a waiting drain; and
+`latency.rs` what crossing to another node adds. Each wake is held round
+by round beside a plain wake, its processor time too
+(`xcore::latency::Rounds`), and a publish's cost by the fastest of five
+(`xcore::latency::spread`). Measured on the owner's
 Windows machine, release build: a publish to one matching subscription
 about 0.7 µs, to a hundred about 15 µs; publish to receipt a median of
 about 40 µs and a 99th percentile under 100 µs.

@@ -4,18 +4,20 @@
 //! and a listener's callback — and the distribution printed, because a
 //! mean hides the tail an operator waits on.
 //!
-//! Two things are held, each by what is Xmip's alone. **The wake is a
-//! wake**: the fastest of each five rounds (`xcore::latency`) is under the
-//! bound plus the same figure for a thread woken on a plain channel,
-//! measured beside it under the same load — a poll or a missed notify is in
-//! every round and fails it, a wake that waited its turn for a processor is
-//! in some only. **Xmip's own work is under the bound**: the processor time
-//! the publishing thread spends in `publish` and the subscriber's thread
-//! between Events, an Event's share (`xcore::processor_time`), which waiting
-//! for a processor does not reach. The median and the tail are printed and
-//! held by nothing: under a machine busy on every processor they measure
-//! the scheduler, and a 99th percentile held against the plain channel's
-//! failed for it.
+//! Two things are held, each by what is Xmip's alone, round by round beside
+//! a plain wake (`xcore::latency::Rounds`). **The wake is a wake**: the
+//! fastest of each five rounds is under the millisecond plus the same
+//! figure for a thread woken on a plain channel, measured beside it under
+//! the same load — a poll or a missed notify is in every round and fails
+//! it, a wake that waited its turn for a processor is in some only.
+//! **Xmip's own work is under the millisecond**: the processor time the
+//! publishing thread spends in `publish` and the subscriber's thread for
+//! the Event (`xcore::processor_time`), the fastest of five, beside the
+//! process's across the plain wake. Until 2026-11-15 the processor time was
+//! an Event's share of the whole run, held flat. The median and the tail
+//! are printed and held by nothing: under a machine busy on every processor
+//! they measure the scheduler, and a 99th percentile held against the plain
+//! channel's failed for it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,7 +30,7 @@ use audit::program_audit::ProgramAudit;
 use authorize_party::PartyPolicy;
 use node::Stage;
 use xcore::PartyId;
-use xcore::latency::{PlainWake, spin, spread};
+use xcore::latency::{Rounds, spin};
 use xcore::processor_time::ProcessorTime;
 use xevent::Event;
 use xevent::filter::Filter;
@@ -39,8 +41,8 @@ use xmip_core_cluster::delivery::subscriber::{Subscriber, fixture};
 /// How many Events each measurement publishes.
 const ROUNDS: usize = 500;
 
-/// The bound: about a millisecond.
-const BOUND: Duration = Duration::from_millis(1);
+/// What a publish wakes where a plain wake wakes one: the subscriber.
+const WAKES: u32 = 1;
 
 fn directory(name: &str) -> PathBuf {
     let at = std::env::temp_dir().join(format!("xmip-event-{name}-{}", std::process::id()));
@@ -60,12 +62,12 @@ fn allowing() -> Hub {
     Hub::new(vec![Arc::new(PartyPolicy::new().allow(PartyId::new(5)))])
 }
 
-/// What publishing `ROUNDS` Events a little apart measured: the publishing
-/// thread's processor time in `publish`, summed, and a plain wake beside
-/// each Event.
+/// What publishing `ROUNDS` Events a little apart measured: a plain wake
+/// beside each Event, and the publishing thread's processor time in each
+/// `publish`.
 struct Published {
-    publishing: Duration,
-    plain: Vec<Duration>,
+    rounds: Rounds,
+    publishing: Vec<Duration>,
 }
 
 /// Publish `ROUNDS` Events a little apart, each stamped as it goes, and
@@ -73,10 +75,9 @@ struct Published {
 /// load the Events are under.
 fn publish_apart(hub: &Hub, sent: &Mutex<Vec<Instant>>) -> Published {
     let node = configure::fixture::test_cluster().node_scope(0);
-    let control = PlainWake::start();
     let mut published = Published {
-        publishing: Duration::ZERO,
-        plain: Vec::with_capacity(ROUNDS),
+        rounds: Rounds::crossing(WAKES),
+        publishing: Vec::with_capacity(ROUNDS),
     };
     for _ in 0..ROUNDS {
         spin(Duration::from_micros(200));
@@ -84,29 +85,28 @@ fn publish_apart(hub: &Hub, sent: &Mutex<Vec<Instant>>) -> Published {
         sent.lock().expect("sent").push(Instant::now());
         let from = ProcessorTime::thread();
         let _ = hub.publish(event);
-        published.publishing += from.elapsed();
+        published.publishing.push(from.elapsed());
         spin(Duration::from_micros(100));
-        published.plain.push(control.round().0);
+        published.rounds.beside();
     }
     published
 }
 
-/// The two holds: the wake against the plain channel's, and Xmip's own
-/// processor time, the publisher's and `subscribing`, summed over every
-/// Event, an Event's share.
-fn hold(what: &str, taken: Vec<Duration>, published: Published, subscribing: Duration) {
-    let taken = spread(what, taken);
-    let machine = spread("a plain channel beside it", published.plain);
-    let worked = published.publishing + subscribing;
-    assert!(
-        taken.fastest_of_five < BOUND + machine.fastest_of_five,
-        "the fastest of five {:?}, the machine's own {:?}",
-        taken.fastest_of_five,
-        machine.fastest_of_five
-    );
-    let own = worked / u32::try_from(ROUNDS).expect("a count");
-    println!("Xmip's own processor time: {own:?} an Event");
-    assert!(own < BOUND, "Xmip's own processor time, {own:?} an Event");
+/// The two holds (`xcore::latency::Rounds::hold`): each Event's way
+/// `taken`, and Xmip's own processor time for it, the publisher's in
+/// `publish` and the subscriber's, `subscribing`, round by round.
+fn hold(what: &str, taken: Vec<Duration>, published: Published, subscribing: &[Duration]) {
+    let Published {
+        mut rounds,
+        publishing,
+    } = published;
+    rounds.took = taken;
+    rounds.worked = publishing
+        .iter()
+        .zip(subscribing)
+        .map(|(publish, subscribe)| *publish + *subscribe)
+        .collect();
+    rounds.hold(what);
 }
 
 #[test]
@@ -122,27 +122,34 @@ fn an_event_reaches_a_waiting_subscriber_within_a_millisecond() {
     let receiver = {
         let sent = Arc::clone(&sent);
         thread::spawn(move || {
-            let mut taken = Vec::with_capacity(ROUNDS);
+            let (mut taken, mut subscribing) =
+                (Vec::with_capacity(ROUNDS), Vec::with_capacity(ROUNDS));
             ready.send(()).expect("ready");
-            // The subscriber's thread's processor time: its waits in `next`
+            // The subscriber's thread's processor time from one delivery's
+            // end to the next one's, an Event's share: its waits in `next`
             // are not counted, only its work.
-            let subscriber_time = ProcessorTime::thread();
+            let mut left = ProcessorTime::thread();
             while taken.len() < ROUNDS {
                 let delivery = subscription.next(Duration::from_secs(5), usize::MAX);
                 let now = Instant::now();
                 let sent = sent.lock().expect("sent");
-                for index in taken.len()..taken.len() + delivery.events.len() {
+                let events = delivery.events.len();
+                for index in taken.len()..taken.len() + events {
                     taken.push(now - sent[index]);
                 }
+                drop(sent);
+                let share = left.elapsed() / u32::try_from(events.max(1)).expect("a count");
+                subscribing.extend(std::iter::repeat_n(share, events));
+                left = ProcessorTime::thread();
             }
-            (taken, subscriber_time.elapsed())
+            (taken, subscribing)
         })
     };
     go.recv().expect("the receiver waits");
     let published = publish_apart(&hub, &sent);
 
     let (taken, subscribing) = receiver.join().expect("received");
-    hold("publish to next", taken, published, subscribing);
+    hold("publish to next", taken, published, &subscribing);
     let _ = fs::remove_dir_all(&at);
 }
 
@@ -180,7 +187,6 @@ fn an_event_reaches_a_listener_within_a_millisecond() {
         .unzip();
     drop(listener);
 
-    let subscribing = worked.iter().sum::<Duration>();
-    hold("publish to callback", taken, published, subscribing);
+    hold("publish to callback", taken, published, &worked);
     let _ = fs::remove_dir_all(&at);
 }
