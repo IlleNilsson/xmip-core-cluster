@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use audit::program_audit::ProgramAudit;
+use audit_file::FileSink;
 use authorize_party::PartyPolicy;
 use node::Stage;
 use observe::Act;
@@ -32,7 +33,7 @@ fn directory(name: &str) -> PathBuf {
 fn subscriber(at: &Path) -> Subscriber {
     fixture::subscriber(
         &fixture::party(PartyId::new(42)),
-        ProgramAudit::new("xmip-core-event tests", Some(at)),
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(at))),
     )
 }
 

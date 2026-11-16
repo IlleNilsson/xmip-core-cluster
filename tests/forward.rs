@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use audit::keeper::settle;
 use audit::program_audit::ProgramAudit;
+use audit_file::FileSink;
 use authorize_party::PartyPolicy;
 use node::Stage;
 use resilience::Guard;
@@ -75,7 +76,7 @@ fn an_event_is_kept_until_the_wire_takes_it_and_arrives_in_order() {
     let hub = Hub::new(vec![Arc::new(PartyPolicy::new().allow(party))]);
     let subscriber = fixture::subscriber(
         &fixture::party(party),
-        ProgramAudit::new("xmip-core-event tests", Some(&at)),
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at))),
     );
     let subscription = hub
         .subscribe(subscriber, Filter::everything(), 0)
@@ -117,7 +118,7 @@ fn an_event_is_kept_until_the_wire_takes_it_and_arrives_in_order() {
         .collect();
     assert_eq!(ids, [first.id.to_string(), second.id.to_string()]);
     settle();
-    let audit = fs::read_to_string(at.join(audit::file_sink::FILE_NAME)).expect("audited");
+    let audit = fs::read_to_string(at.join(audit::audit_store::FILE_NAME)).expect("audited");
     assert!(audit.contains("given up for now"), "{audit}");
     assert!(audit.contains("2 Events carried"), "{audit}");
     let _ = fs::remove_dir_all(&at);

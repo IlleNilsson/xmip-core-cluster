@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use audit::program_audit::ProgramAudit;
+use audit_file::FileSink;
 use authorize_party::PartyPolicy;
 use node::{Capability, Stage};
 use xcore::clock::Stepped;
@@ -164,7 +165,10 @@ impl TestNode {
         membership: Arc<dyn Membership>,
     ) -> Self {
         let hub = Hub::new(Vec::new());
-        let audit = ProgramAudit::new("xmip-core-cluster tests", Some(&directory(name)));
+        let audit = ProgramAudit::new(
+            "xmip-core-cluster tests",
+            Some(FileSink::new(directory(name))),
+        );
         let clock = Arc::new(Stepped::default());
         let plane = Plane::join(
             &hub,
