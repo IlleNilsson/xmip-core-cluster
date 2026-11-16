@@ -11,13 +11,15 @@ mod test_cluster;
 use std::collections::BTreeSet;
 use std::net::TcpListener;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use node::Capability;
-use test_cluster::{Authority, Roster, TestNode, drained, failures, name, node, until};
+use test_cluster::{
+    Authority, Roster, TestNode, drained, failures, name, node, silent_member, until,
+};
 use xevent::filter::Filter;
 use xevent::outcome::Outcome;
-use xmip_core_cluster::Member;
+use xmip_core_cluster::{Member, Timing};
 
 const WITHIN: Duration = Duration::from_secs(5);
 
@@ -171,6 +173,42 @@ fn a_member_naming_no_sync_listener_is_unheard_and_said_why() {
     assert_eq!(unheard[0].node, node(&name(1)));
     assert!(
         unheard[0].said().contains("it names no sync listener"),
+        "{}",
+        unheard[0].said()
+    );
+}
+
+#[test]
+fn a_member_silent_for_its_silence_on_the_nodes_clock_is_unheard() {
+    let (authority, roster) = (Authority::new(), Arc::new(Roster::default()));
+    let one = TestNode::join(&name(0), &authority, &roster);
+    roster.add(Member {
+        node: node(&name(1)),
+        address: Some(silent_member(&authority)),
+        capability: Capability::none(),
+        operate: None,
+        storage_place: None,
+        stopped: None,
+    });
+    TestNode::follow(&[&one]);
+    // Linked, and heard while the node's clock stands, though it beats not.
+    assert_eq!(one.hub.unheard(), Vec::new());
+
+    // Stepped past its silence at every look, as the link's reading thread
+    // may begin its watch after the first; taken for silent long before
+    // the operating system's clock could pass it.
+    let silence = Timing::default().silence;
+    let began = Instant::now();
+    let taken = until(WITHIN, || {
+        one.clock.pass(silence);
+        !one.hub.unheard().is_empty()
+    });
+    let waited = began.elapsed();
+    assert!(taken && waited < silence, "taken {taken} after {waited:?}");
+    let unheard = one.hub.unheard();
+    assert_eq!(unheard[0].node, node(&name(1)));
+    assert!(
+        unheard[0].said().contains("silent"),
         "{}",
         unheard[0].said()
     );

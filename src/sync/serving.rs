@@ -17,7 +17,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use xcore::lock::Locked;
 
 use super::link::{self, ALPN, Tap};
@@ -25,7 +25,7 @@ use crate::delivery::audit_trail::noted;
 use crate::delivery::hub::Hub;
 use audit::program_audit::ProgramAudit;
 use net::watched::Watched;
-use xcore::Severity;
+use xcore::{Clock, Severity};
 
 use crate::Timing;
 
@@ -39,8 +39,15 @@ const WAKE: Duration = Duration::from_secs(1);
 type Served = Arc<Mutex<Vec<JoinHandle<()>>>>;
 
 /// What a sync listener serves: the hub whose own Events it answers with,
-/// what the node presents and trusts, its bounds and its audit.
-pub(super) type Serves<'a> = (&'a Hub, &'a tls::Identity, &'a Timing, &'a ProgramAudit);
+/// what the node presents and trusts, its bounds, its audit and the Clock
+/// it tells time by.
+pub(super) type Serves<'a> = (
+    &'a Hub,
+    &'a tls::Identity,
+    &'a Timing,
+    &'a ProgramAudit,
+    &'a Arc<dyn Clock>,
+);
 
 /// What every connection shares.
 struct Serve {
@@ -49,6 +56,7 @@ struct Serve {
     timing: Timing,
     stopping: AtomicBool,
     audit: ProgramAudit,
+    clock: Arc<dyn Clock>,
 }
 
 /// The sync listener, serving until it is stopped.
@@ -63,7 +71,7 @@ impl Serving {
     /// Serve the hub's own Events to every node connecting to `listener`
     /// with a certificate reaching the identity's anchors.
     pub(super) fn start(given: Serves<'_>, listener: TcpListener) -> Result<Self, String> {
-        let (hub, identity, timing, audit) = given;
+        let (hub, identity, timing, audit, clock) = given;
         let config = tls::alpn::selecting(identity.server().map_err(|e| e.message)?, &[ALPN]);
         let address = listener.local_addr().map_err(|e| e.to_string())?;
         let serve = Arc::new(Serve {
@@ -72,6 +80,7 @@ impl Serving {
             timing: *timing,
             stopping: AtomicBool::new(false),
             audit: audit.clone(),
+            clock: Arc::clone(clock),
         });
         let served: Served = Arc::default();
         let accepting = {
@@ -219,12 +228,11 @@ fn listen<W: Write>(
     reading: impl Read,
     ending: &AtomicBool,
 ) -> String {
-    let mut watched = Watched {
+    let mut watched = Watched::new(
         reading,
-        ending: || serve.stopping.load(Ordering::SeqCst) || ending.load(Ordering::SeqCst),
-        silence: None,
-        heard: Instant::now(),
-    };
+        || serve.stopping.load(Ordering::SeqCst) || ending.load(Ordering::SeqCst),
+        || serve.clock.monotonic_nanos(),
+    );
     loop {
         match link::receive(&mut watched) {
             Ok(Some(frame)) => {

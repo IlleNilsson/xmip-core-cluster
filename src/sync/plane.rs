@@ -10,8 +10,8 @@ use std::thread::JoinHandle;
 use xcore::lock::Locked;
 
 use audit::program_audit::ProgramAudit;
-use xcore::Severity;
 use xcore::wake::Revision;
+use xcore::{Clock, Severity};
 
 use super::link::ALPN;
 use super::serving::Serving;
@@ -34,6 +34,9 @@ pub struct Joining {
     pub timing: Timing,
     /// Where the links are audited: the node's own audit.
     pub audit: ProgramAudit,
+    /// What the plane tells time by: a member's silence is counted on its
+    /// monotonic reading (ADR-0068, amendment 2026-11-15).
+    pub clock: Arc<dyn Clock>,
 }
 
 /// A node's part in the sync plane: its sync listener answering the other
@@ -53,6 +56,7 @@ struct Follow {
     config: Arc<tls::ClientConfig>,
     timing: Timing,
     audit: ProgramAudit,
+    clock: Arc<dyn Clock>,
     signal: Revision,
     stopping: AtomicBool,
     upstreams: Mutex<BTreeMap<String, (Member, Upstream)>>,
@@ -68,7 +72,13 @@ impl Plane {
         let refused = |reason: String| ClusterError::new(format!("joining the cluster: {reason}"));
         let client = joining.identity.client().map_err(|e| refused(e.message))?;
         let config = Arc::new(tls::alpn::offering(client, &[ALPN]));
-        let served = (hub, &joining.identity, &joining.timing, &joining.audit);
+        let served = (
+            hub,
+            &joining.identity,
+            &joining.timing,
+            &joining.audit,
+            &joining.clock,
+        );
         let serving = Serving::start(served, joining.listener).map_err(refused)?;
         let following = Arc::new(Follow {
             hub: hub.clone(),
@@ -77,6 +87,7 @@ impl Plane {
             config,
             timing: joining.timing,
             audit: joining.audit,
+            clock: joining.clock,
             signal: Revision::default(),
             stopping: AtomicBool::new(false),
             upstreams: Mutex::new(BTreeMap::new()),
@@ -192,7 +203,13 @@ impl Follow {
             if upstreams.contains_key(&node) {
                 continue;
             }
-            let following = (&self.hub, self.node.as_str(), &self.config, &self.audit);
+            let following = (
+                &self.hub,
+                self.node.as_str(),
+                &self.config,
+                &self.audit,
+                &self.clock,
+            );
             match Upstream::start(following, member.clone(), self.timing) {
                 Ok(upstream) => {
                     upstreams.insert(node.clone(), (member, upstream));
