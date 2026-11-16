@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 use audit::program_audit::ProgramAudit;
 use authorize_party::PartyPolicy;
 use node::{Capability, Stage};
-use xcore::PartyId;
+use xcore::clock::Stepped;
+use xcore::{Clock, PartyId};
 use xevent::Event;
 use xevent::filter::Filter;
 use xevent::outcome::Outcome;
@@ -115,6 +116,9 @@ pub struct TestNode {
     pub hub: Hub,
     pub plane: Option<Plane>,
     pub audit: ProgramAudit,
+    /// What its plane tells time by: a member's silence passes only as the
+    /// test steps it.
+    pub clock: Arc<Stepped>,
     /// The Parties its hub's policy allows: those that subscribed here.
     allowed: Mutex<PartyPolicy>,
 }
@@ -161,6 +165,7 @@ impl TestNode {
     ) -> Self {
         let hub = Hub::new(Vec::new());
         let audit = ProgramAudit::new("xmip-core-cluster tests", Some(&directory(name)));
+        let clock = Arc::new(Stepped::default());
         let plane = Plane::join(
             &hub,
             Joining {
@@ -170,6 +175,7 @@ impl TestNode {
                 membership,
                 timing: Timing::default(),
                 audit: audit.clone(),
+                clock: Arc::clone(&clock) as Arc<dyn Clock>,
             },
         )
         .expect("joined");
@@ -178,6 +184,7 @@ impl TestNode {
             hub,
             plane: Some(plane),
             audit,
+            clock,
             allowed: Mutex::new(PartyPolicy::new()),
         }
     }
@@ -220,6 +227,31 @@ impl TestNode {
             plane.stop();
         }
     }
+}
+
+/// A member that takes the Event link and says nothing on it, presenting an
+/// identity `authority` issued: where it listens. Its thread reads what the
+/// node asks, answers nothing, and ends with the link.
+#[must_use]
+pub fn silent_member(authority: &Authority) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a sync listener");
+    let address = listener.local_addr().expect("its address").to_string();
+    let server = authority.identity().server().expect("a server");
+    let config = Arc::new(tls::alpn::selecting(
+        server,
+        &[xmip_core_cluster::sync::link::ALPN],
+    ));
+    std::thread::spawn(move || {
+        // bounded: the node links before its follow returns; a failed test ends its process
+        let (connection, _) = listener.accept().expect("the link");
+        connection
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("bounded");
+        let mut guarded = tls::server(connection, config).expect("tls");
+        let mut buffer = [0u8; 4096];
+        while matches!(std::io::Read::read(&mut guarded, &mut buffer), Ok(read) if read > 0) {}
+    });
+    address
 }
 
 /// A directory of this test's own.

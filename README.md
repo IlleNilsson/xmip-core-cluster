@@ -145,7 +145,10 @@ members over Xmip's mutual TLS (`sync/serving.rs`), a link to each of them
 `Membership`. It carries the cluster's Events, so any node is the
 cluster's door (ADR-0065); it hands every frame to the Event conversation
 (`sync::link`) and decides nothing about one. A member naming no sync
-listener is unheard, and said so. Held by `tests/sync.rs` (nodes in this
+listener is unheard, and said so; so is one silent for `sync_silence`,
+counted on the Clock the node joined with (`sync::Joining::clock`,
+`net::watched`; ADR-0068, amendment 2026-11-15), which a test steps past
+the silence with no sleep. Held by `tests/sync.rs` (nodes in this
 process) and `tests/sync_process.rs` (nodes in processes of their own).
 
 ## Near real time

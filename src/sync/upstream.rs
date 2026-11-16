@@ -21,7 +21,6 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Instant;
 use xcore::lock::Locked;
 
 use super::link::{self, ALPN};
@@ -29,18 +28,20 @@ use crate::delivery::audit_trail::noted;
 use crate::delivery::hub::Hub;
 use audit::program_audit::ProgramAudit;
 use net::watched::Watched;
-use xcore::Severity;
 use xcore::wake::Revision;
+use xcore::{Clock, Severity};
 
 use crate::{Member, Timing};
 
 /// What follows a member: this node's hub, this node, what the link
-/// presents, and the node's audit.
+/// presents, the node's audit, and the Clock the member's silence is
+/// counted on.
 pub(super) type Following<'a> = (
     &'a Hub,
     &'a str,
     &'a Arc<tls::ClientConfig>,
     &'a ProgramAudit,
+    &'a Arc<dyn Clock>,
 );
 
 /// One member's link, on its own thread.
@@ -70,6 +71,8 @@ struct Ask {
     /// In a connect, which nothing can cut short.
     connecting: Arc<AtomicBool>,
     audit: ProgramAudit,
+    /// What the member's silence is counted on.
+    clock: Arc<dyn Clock>,
 }
 
 /// How one attempt at the link ended.
@@ -88,7 +91,7 @@ impl Upstream {
         member: Member,
         timing: Timing,
     ) -> Result<Self, String> {
-        let (hub, by, config, audit) = following;
+        let (hub, by, config, audit, clock) = following;
         let address = member
             .address
             .clone()
@@ -116,6 +119,7 @@ impl Upstream {
             stopping: Arc::clone(&stopping),
             connecting: Arc::clone(&connecting),
             audit: audit.clone(),
+            clock: Arc::clone(clock),
         };
         let thread = std::thread::Builder::new()
             .name("xmip-event-upstream".to_string())
@@ -220,18 +224,16 @@ impl Ask {
                 Arc::clone(&self.stopping),
             );
             let (link, node, audit) = (self.link, self.member.node.clone(), self.audit.clone());
-            let reading = split.reading;
+            let (reading, now) = (split.reading, xcore::clock::reading(&self.clock));
             std::thread::Builder::new()
                 .name("xmip-event-upstream-read".to_string())
                 .spawn(move || {
-                    let mut watched = Watched {
+                    let mut watched = Watched::new(
                         reading,
-                        ending: || {
-                            closing.load(Ordering::SeqCst) || stopping.load(Ordering::SeqCst)
-                        },
-                        silence: Some(timing.silence),
-                        heard: Instant::now(),
-                    };
+                        || closing.load(Ordering::SeqCst) || stopping.load(Ordering::SeqCst),
+                        now,
+                    );
+                    watched.silence = Some(timing.silence);
                     let reason = hear(&hub, link, &node, &audit, &mut watched);
                     *broke.locked() = Some(reason);
                     signal.raise();
