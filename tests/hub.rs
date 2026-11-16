@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use audit::keeper::settle;
 use audit::program_audit::ProgramAudit;
+use audit_file::FileSink;
 use authorize_party::PartyPolicy;
 use node::Stage;
 use xcore::{PartyId, Severity};
@@ -32,13 +33,13 @@ fn directory(name: &str) -> PathBuf {
 fn subscriber(at: &Path) -> Subscriber {
     fixture::subscriber(
         &fixture::party(PartyId::new(42)),
-        ProgramAudit::new("xmip-core-event tests", Some(at)),
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(at))),
     )
 }
 
 fn audited(at: &Path) -> String {
     settle();
-    fs::read_to_string(at.join(audit::file_sink::FILE_NAME)).unwrap_or_default()
+    fs::read_to_string(at.join(audit::audit_store::FILE_NAME)).unwrap_or_default()
 }
 
 fn hub() -> Hub {

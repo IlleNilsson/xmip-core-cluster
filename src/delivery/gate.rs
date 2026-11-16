@@ -43,6 +43,7 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use audit::program_audit::ProgramAudit;
+    use audit_file::FileSink;
     use authorize_party::PartyPolicy;
     use xcore::PartyId;
 
@@ -54,7 +55,7 @@ mod tests {
         let at = std::env::temp_dir().join("xmip-core-event-gate-tests");
         fixture::subscriber(
             &fixture::party(PartyId::new(party)),
-            ProgramAudit::new("xmip-core-event tests", Some(&at)),
+            ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at))),
         )
     }
 

@@ -200,6 +200,7 @@ pub mod fixture {
 mod tests {
     use super::fixture::{party, subscriber};
     use super::*;
+    use audit_file::FileSink;
     use context::Verified;
     use xcore::{Established, Layer, mechanism};
 
@@ -224,7 +225,7 @@ mod tests {
 
     fn audit() -> ProgramAudit {
         let at = std::env::temp_dir().join("xmip-core-event-subscriber-tests");
-        ProgramAudit::new("xmip-core-event tests", Some(&at))
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at)))
     }
 
     #[test]
@@ -297,7 +298,7 @@ mod tests {
         let at =
             std::env::temp_dir().join(format!("xmip-core-event-refused-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&at);
-        let audit = ProgramAudit::new("xmip-core-event tests", Some(&at));
+        let audit = ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at)));
         let caller = AuthenticatedIdentity::new(
             mechanism::peer_credentials(),
             "nobody-held",
@@ -309,7 +310,7 @@ mod tests {
         refused(&audit, Some(&caller), &filter, "REFUSED: no Party holds it");
         audit::keeper::settle();
 
-        let kept = std::fs::read_to_string(at.join(audit::file_sink::FILE_NAME)).expect("kept");
+        let kept = std::fs::read_to_string(at.join(audit::audit_store::FILE_NAME)).expect("kept");
         for said in [
             "event.subscribe",
             "REFUSED: no Party holds it",
