@@ -130,8 +130,11 @@ retry = { package = "xmip-core-resilience-retry", git = "https://github.com/Ille
 # the party technology of the authorize capability, never a copy of it.
 authorize-party = { package = "xmip-core-authorize-party", git = "https://github.com/IlleNilsson/xmip-core-authorize-party", branch = "main" }
 # The sink the tests hand their audit, as every program hands it, read back
-# from the file: the file technology of the audit capability.
-audit-file = { package = "xmip-core-audit-file", git = "https://github.com/IlleNilsson/xmip-core-audit-file", branch = "main" }
+# from the file: the file technology of the audit capability. And the
+# folder it writes in, removed once audit's keeper kept what the hub and the
+# sync plane handed it (`audit_file::temporary`; ADR-0065, amendment
+# 2026-11-20).
+audit-file = { package = "xmip-core-audit-file", git = "https://github.com/IlleNilsson/xmip-core-audit-file", branch = "main", features = ["test-support"] }
 # A test cluster's authority and each node's certificate. Test-only.
 rcgen = "0.14"
 

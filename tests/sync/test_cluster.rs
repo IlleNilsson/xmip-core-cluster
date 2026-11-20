@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
+use audit_file::temporary::Folder;
 use authorize_party::PartyPolicy;
-use file::temporary::Folder;
 use node::{Capability, Stage};
 use xcore::clock::Stepped;
 use xcore::{Clock, PartyId};
@@ -122,7 +122,8 @@ pub struct TestNode {
     /// The Parties its hub's policy allows: those that subscribed here.
     allowed: Mutex<PartyPolicy>,
     /// Where its audit is written: the last field, so it is removed after
-    /// everything that writes in it.
+    /// everything that writes in it, once audit's keeper kept what they
+    /// handed it.
     folder: Folder,
 }
 

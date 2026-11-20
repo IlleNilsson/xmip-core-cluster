@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
+use audit_file::temporary::Folder;
 use authorize_party::PartyPolicy;
-use file::temporary::Folder;
 use node::Stage;
 use observe::Act;
 use xcore::PartyId;

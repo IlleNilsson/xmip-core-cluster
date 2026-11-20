@@ -44,8 +44,8 @@ impl Hub {
 mod tests {
     use audit::program_audit::ProgramAudit;
     use audit_file::FileSink;
+    use audit_file::temporary::Folder;
     use authorize_party::PartyPolicy;
-    use file::temporary::Folder;
     use std::path::Path;
     use xcore::PartyId;
 
@@ -77,7 +77,5 @@ mod tests {
                 .is_err(),
             "another Party in the same process is not allowed by it"
         );
-        drop(hub);
-        audit::keeper::settle();
     }
 }
