@@ -6,15 +6,14 @@
 
 #![allow(dead_code)]
 
-use std::fs;
 use std::net::TcpListener;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::{Capability, Stage};
 use xcore::clock::Stepped;
 use xcore::{Clock, PartyId};
@@ -122,6 +121,9 @@ pub struct TestNode {
     pub clock: Arc<Stepped>,
     /// The Parties its hub's policy allows: those that subscribed here.
     allowed: Mutex<PartyPolicy>,
+    /// Where its audit is written: the last field, so it is removed after
+    /// everything that writes in it.
+    folder: Folder,
 }
 
 impl TestNode {
@@ -165,10 +167,8 @@ impl TestNode {
         membership: Arc<dyn Membership>,
     ) -> Self {
         let hub = Hub::new(Vec::new());
-        let audit = ProgramAudit::new(
-            "xmip-core-cluster tests",
-            Some(FileSink::new(directory(name))),
-        );
+        let folder = Folder::new(&format!("cluster-sync-{name}"));
+        let audit = ProgramAudit::new("xmip-core-cluster tests", Some(FileSink::new(&*folder)));
         let clock = Arc::new(Stepped::default());
         let plane = Plane::join(
             &hub,
@@ -190,6 +190,7 @@ impl TestNode {
             audit,
             clock,
             allowed: Mutex::new(PartyPolicy::new()),
+            folder,
         }
     }
 
@@ -256,14 +257,6 @@ pub fn silent_member(authority: &Authority) -> String {
         while matches!(std::io::Read::read(&mut guarded, &mut buffer), Ok(read) if read > 0) {}
     });
     address
-}
-
-/// A directory of this test's own.
-#[must_use]
-pub fn directory(name: &str) -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-cluster-sync-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&at);
-    at
 }
 
 /// What `subscription` is handed within `within`, until `count` arrived.

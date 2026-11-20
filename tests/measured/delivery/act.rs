@@ -5,7 +5,7 @@
 //! plain wake does). Until 2026-11-14 one resume was timed once, and until
 //! 2026-11-15 the fastest of five was held flat.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::Stage;
 use observe::Act;
 use xcore::PartyId;
@@ -24,12 +25,6 @@ use xevent::outcome::Outcome;
 use xmip_core_cluster::delivery::hub::Hub;
 use xmip_core_cluster::delivery::subscriber::{Subscriber, fixture};
 
-fn directory(name: &str) -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-event-act-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&at);
-    at
-}
-
 fn subscriber(at: &Path) -> Subscriber {
     fixture::subscriber(
         &fixture::party(PartyId::new(42)),
@@ -39,7 +34,7 @@ fn subscriber(at: &Path) -> Subscriber {
 
 #[test]
 fn a_resume_wakes_a_waiting_drain_within_a_millisecond() {
-    let at = directory("resume-measured");
+    let at = Folder::new("cluster-act-resume-measured");
     let hub = Arc::new(Hub::new(vec![Arc::new(
         PartyPolicy::new().allow(PartyId::new(42)),
     )]));
@@ -85,7 +80,6 @@ fn a_resume_wakes_a_waiting_drain_within_a_millisecond() {
     drop(ask);
     drop(waiting.join().expect("joined"));
     rounds.hold("a resume to the drain waiting on it woken");
-    let _ = std::fs::remove_dir_all(&at);
 }
 
 /// How many resumes are timed.

@@ -1,13 +1,14 @@
 //! The in-process hub, measured: a publish costs microseconds, to a
 //! hundred matching subscriptions and to one.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::Stage;
 use xcore::PartyId;
 use xcore::latency::spread;
@@ -16,13 +17,6 @@ use xevent::filter::Filter;
 use xevent::outcome::Outcome;
 use xmip_core_cluster::delivery::hub::Hub;
 use xmip_core_cluster::delivery::subscriber::{Subscriber, fixture};
-
-/// A directory of this test's own for the audit it writes.
-fn directory(name: &str) -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-event-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&at);
-    at
-}
 
 fn subscriber(at: &Path) -> Subscriber {
     fixture::subscriber(
@@ -38,7 +32,7 @@ fn received(outcome: Outcome) -> Event {
 
 #[test]
 fn a_publish_to_a_hundred_subscriptions_takes_microseconds() {
-    let at = directory("cost");
+    let at = Folder::new("cluster-hub-cost");
     let hub = Hub::new(vec![Arc::new(PartyPolicy::new().allow(PartyId::new(42)))]);
     let cluster = configure::fixture::test_cluster().scope();
     let subscriptions: Vec<_> = (0..100)
@@ -63,7 +57,6 @@ fn a_publish_to_a_hundred_subscriptions_takes_microseconds() {
     let each = published(&hub, events, "a publish to 1 matching subscription");
     assert!(each < Duration::from_millis(1), "a publish took {each:?}");
     drop(one);
-    let _ = std::fs::remove_dir_all(&at);
 }
 
 /// `events` published one by one on `hub`, each timed, printed under

@@ -202,6 +202,8 @@ mod tests {
     use super::*;
     use audit_file::FileSink;
     use context::Verified;
+    use file::temporary::Folder;
+    use std::path::Path;
     use xcore::{Established, Layer, mechanism};
 
     struct Only(&'static str);
@@ -223,14 +225,14 @@ mod tests {
         }
     }
 
-    fn audit() -> ProgramAudit {
-        let at = std::env::temp_dir().join("xmip-core-event-subscriber-tests");
-        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at)))
+    fn audit(at: &Path) -> ProgramAudit {
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(at)))
     }
 
     #[test]
     fn nothing_configured_is_a_refusal_as_at_every_gate() {
-        let subscriber = subscriber(&party(PartyId::new(1)), audit());
+        let at = Folder::new("cluster-subscriber");
+        let subscriber = subscriber(&party(PartyId::new(1)), audit(&at));
 
         let decision = subscriber.authorized(&Filter::everything(), &[]);
 
@@ -243,7 +245,8 @@ mod tests {
 
     #[test]
     fn every_type_asked_for_must_be_allowed() {
-        let subscriber = subscriber(&party(PartyId::new(1)), audit());
+        let at = Folder::new("cluster-subscriber");
+        let subscriber = subscriber(&party(PartyId::new(1)), audit(&at));
         let only = Only("se.xmip.send.failure");
         let policies: [&dyn Authorizer; 1] = [&only];
         let one = Filter::everything().of_type("se.xmip.send.failure");
@@ -258,6 +261,7 @@ mod tests {
 
     #[test]
     fn a_subscriber_is_only_the_party_its_proven_caller_resolved_to() {
+        let at = Folder::new("cluster-subscriber");
         let declared = Party::new(PartyId::new(7), None, "operations");
         let caller = |verified, party: Option<u128>| {
             let identity = AuthenticatedIdentity::new(
@@ -272,7 +276,7 @@ mod tests {
             }
         };
 
-        let proven = Subscriber::proven(caller(Verified::Proven, Some(7)), &declared, audit())
+        let proven = Subscriber::proven(caller(Verified::Proven, Some(7)), &declared, audit(&at))
             .expect("the Party it proved to be");
         assert_eq!(
             (proven.party(), proven.name()),
@@ -285,7 +289,7 @@ mod tests {
             (Verified::Claimed, Some(7), "is claimed, not proven"),
             (Verified::Vouched, Some(7), "is vouched, not proven"),
         ] {
-            let refused = Subscriber::proven(caller(verified, party), &declared, audit())
+            let refused = Subscriber::proven(caller(verified, party), &declared, audit(&at))
                 .expect_err("refused");
             assert!(refused.message.contains(said), "{refused}");
         }
@@ -295,10 +299,8 @@ mod tests {
     fn a_subscribe_refused_before_it_had_a_subscriber_is_audited_with_who_and_what() {
         // ADR-0013 clause 1: the claim, its mechanism and how it was
         // established, and what it asked for, as the hub records its own.
-        let at =
-            std::env::temp_dir().join(format!("xmip-core-event-refused-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&at);
-        let audit = ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at)));
+        let at = Folder::new("cluster-refused");
+        let audit = audit(&at);
         let caller = AuthenticatedIdentity::new(
             mechanism::peer_credentials(),
             "nobody-held",
@@ -321,6 +323,5 @@ mod tests {
         ] {
             assert!(kept.contains(said), "{said} in {kept}");
         }
-        let _ = std::fs::remove_dir_all(&at);
     }
 }

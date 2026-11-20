@@ -122,6 +122,8 @@ configure = { package = "xmip-core-configure", git = "https://github.com/IlleNil
 # The latency figures and Xmip's own processor time (`xcore::latency`,
 # `xcore::processor_time`). Test-only.
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main", features = ["test-support"] }
+# A test's own temporary folder (`file::temporary`); for the tests only.
+file = { package = "xmip-core-library-file", git = "https://github.com/IlleNilsson/xmip-core-library-file", branch = "main", features = ["test-support"] }
 # One real guard, so the at-least-once test is judged as a node judges it.
 retry = { package = "xmip-core-resilience-retry", git = "https://github.com/IlleNilsson/xmip-core-resilience-retry", branch = "main" }
 # The policy the tests hand a hub, allowing the Parties they subscribe as:

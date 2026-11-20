@@ -18,8 +18,9 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use file::temporary::Folder;
 use node::Capability;
-use test_cluster::{Authority, TestNode, directory, failures, name, node};
+use test_cluster::{Authority, TestNode, failures, name, node};
 use xevent::outcome::Outcome;
 use xmip_core_cluster::{ClusterError, Member, Membership};
 
@@ -243,9 +244,8 @@ impl Drop for NodeProcess {
 
 /// A cluster directory: the authority's anchors, each node's certificate
 /// and key, and the roster.
-fn cluster(name: &str, nodes: &[&str]) -> PathBuf {
-    let at = directory(name);
-    std::fs::create_dir_all(&at).expect("a directory");
+fn cluster(name: &str, nodes: &[&str]) -> Folder {
+    let at = Folder::new(&format!("cluster-sync-{name}"));
     let authority = Authority::new();
     for each in nodes {
         let (certificate, key, anchors) = authority.issue();
