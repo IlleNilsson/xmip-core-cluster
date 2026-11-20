@@ -26,7 +26,7 @@
 //! publishes.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 use std::time::Duration;
 use xcore::lock::{Locked, ReadWriteLocked};
@@ -83,6 +83,8 @@ pub(crate) struct Slot {
     pub(crate) filter: Filter,
     since_unix_nanos: i64,
     pub(crate) queue: Queue,
+    /// Whether its close record was handed over ([`Slot::unsubscribe`]).
+    unsubscribed: AtomicBool,
 }
 
 /// What one drain handed over: the Events, oldest first; how many a full
@@ -167,6 +169,7 @@ impl Hub {
             } else {
                 capacity
             }),
+            unsubscribed: AtomicBool::new(false),
         });
         let generation = self.inner.change(|slots| slots.push(Arc::clone(&slot)));
         // Every node that is heard carries it before it is handed over.
@@ -290,6 +293,36 @@ impl Slot {
             since_unix_nanos: self.since_unix_nanos,
         }
     }
+
+    /// Close it, take it out of `hub` and hand its close record to audit's
+    /// keeper, on this thread and once: by whichever drops first, the
+    /// subscription or a listener inside its own callback, whose thread
+    /// cannot wait for itself (ADR-0065, amendment 2026-11-20). Handed over,
+    /// never waited for: the dropping thread is the program's, and a disk is
+    /// not its business. The program's next direct record — its stop — is
+    /// kept after this one.
+    pub(crate) fn unsubscribe(&self, hub: &Weak<Inner>) {
+        self.queue.close();
+        if self.unsubscribed.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Some(inner) = hub.upgrade() {
+            Hub { inner }.forget(self.id);
+        }
+        record(
+            &self.subscriber,
+            "event.unsubscribe",
+            Severity::Information,
+            "closed",
+            described(&self.subscriber, &self.filter),
+        );
+    }
+
+    /// Whether its close record was handed over: nothing more is handed to
+    /// a callback.
+    pub(crate) fn unsubscribed(&self) -> bool {
+        self.unsubscribed.load(Ordering::Acquire)
+    }
 }
 
 /// An open subscription. Dropping it unsubscribes, and says so to audit.
@@ -342,21 +375,6 @@ impl EventSubscription {
 
 impl Drop for EventSubscription {
     fn drop(&mut self) {
-        self.slot.queue.close();
-        if let Some(inner) = self.hub.upgrade() {
-            let id = self.slot.id;
-            inner.change(|slots| slots.retain(|slot| slot.id != id));
-        }
-        let about = described(&self.subscriber, &self.slot.filter);
-        record(
-            &self.subscriber,
-            "event.unsubscribe",
-            Severity::Information,
-            "closed",
-            about,
-        );
-        // Handed to the keeper, never waited for here: the dropping thread
-        // is the program's, and a disk is not its business. The program's
-        // next direct record — its stop — is kept after this one.
+        self.slot.unsubscribe(&self.hub);
     }
 }

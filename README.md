@@ -122,7 +122,12 @@ without the plane (ADR-0065, amendment 2026-11-13).
   recorded in the subscriber's program audit (ADR-0062), handed to the
   audit capability's keeper (`audit::keeper`) so no Event waits for a disk
   and unsubscribing never does either; the program's next direct record —
-  its stop — is kept after them. A test records no stop, so each test here
+  its stop — is kept after them. A subscription's close record is handed
+  over once, before the drop that closes it returns, by whichever drops
+  first (`Slot::unsubscribe`): the `EventSubscription`, or a `Listener`
+  dropped inside its own callback, whose thread cannot be joined there and
+  calls back nothing more (ADR-0065, amendment 2026-11-20, a listener
+  closed in its own callback). A test records no stop, so each test here
   makes the folder its audit is written in with `xmip-core-audit-file`'s
   `temporary::Folder`, first, removed only once the keeper kept what the
   hub and the sync plane handed it; one removed sooner was made again by

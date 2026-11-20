@@ -4,15 +4,19 @@
 //! The callback runs on the listener's thread, never the publisher's, so a
 //! slow callback fills its own queue and nothing else. Dropping the
 //! [`Listener`] closes the queue, which wakes the thread; it finishes the
-//! callback it is in, unsubscribes, and is joined — unless the drop happens
-//! inside the callback itself, where the thread cannot wait for itself and
-//! is left to end on its own.
+//! drain it is in, unsubscribes, and is joined, so the close record is
+//! handed over before the drop returns. Inside the callback itself the
+//! thread cannot wait for itself, and is never made to: the drop
+//! unsubscribes there and then, the close record handed to audit's keeper
+//! on that thread before the drop returns, and the thread calls back
+//! nothing more and ends once the callback returns (ADR-0065, amendment
+//! 2026-11-20).
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::delivery::hub::{EventSubscription, Slot};
+use crate::delivery::hub::{EventSubscription, Inner, Slot};
 use xevent::Event;
 
 /// How long the thread sleeps between looks when nothing arrives; closing
@@ -25,6 +29,7 @@ const BATCH: usize = 256;
 /// A subscription and the thread calling back for it.
 pub struct Listener {
     slot: Arc<Slot>,
+    hub: Weak<Inner>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -39,6 +44,7 @@ impl EventSubscription {
         mut each: impl FnMut(&Event) + Send + 'static,
     ) -> std::io::Result<Listener> {
         let slot = self.slot();
+        let hub = self.hub.clone();
         let thread = thread::Builder::new()
             .name("xmip-event-listener".to_string())
             .spawn(move || {
@@ -46,6 +52,10 @@ impl EventSubscription {
                 let slot = subscription.slot();
                 while !slot.queue.is_closed() {
                     for event in subscription.next(IDLE, BATCH).events {
+                        // Dropped in the callback before: nothing more.
+                        if slot.unsubscribed() {
+                            break;
+                        }
                         each(&event);
                     }
                 }
@@ -53,6 +63,7 @@ impl EventSubscription {
 
         Ok(Listener {
             slot,
+            hub,
             thread: Some(thread),
         })
     }
@@ -60,10 +71,15 @@ impl EventSubscription {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        self.slot.queue.close();
-        if let Some(thread) = self.thread.take()
-            && thread.thread().id() != thread::current().id()
-        {
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        if thread.thread().id() == thread::current().id() {
+            // Inside its own callback: unsubscribed here, so the close
+            // record is the keeper's before this drop returns.
+            self.slot.unsubscribe(&self.hub);
+        } else {
+            self.slot.queue.close();
             // A callback that panicked has already said so on its thread.
             let _ = thread.join();
         }
