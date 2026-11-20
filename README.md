@@ -122,7 +122,11 @@ without the plane (ADR-0065, amendment 2026-11-13).
   recorded in the subscriber's program audit (ADR-0062), handed to the
   audit capability's keeper (`audit::keeper`) so no Event waits for a disk
   and unsubscribing never does either; the program's next direct record —
-  its stop — is kept after them.
+  its stop — is kept after them. A test records no stop, so each test here
+  makes the folder its audit is written in with `xmip-core-audit-file`'s
+  `temporary::Folder`, first, removed only once the keeper kept what the
+  hub and the sync plane handed it; one removed sooner was made again by
+  the record kept after it (ADR-0065, amendment 2026-11-20).
 - **Tests build theirs through `delivery::subscriber::fixture`**, behind
   the `test-support` feature as `configure::fixture` is: a subscriber
   whose caller is built proven, as a gate would answer. Only a
@@ -149,7 +153,9 @@ listener is unheard, and said so; so is one silent for `sync_silence`,
 counted on the Clock the node joined with (`sync::Joining::clock`,
 `net::watched`; ADR-0068, amendment 2026-11-15), which a test steps past
 the silence with no sleep. Held by `tests/sync.rs` (nodes in this
-process) and `tests/sync_process.rs` (nodes in processes of their own).
+process) and `tests/sync_process.rs` (nodes in processes of their own,
+each one's temporary directory the cluster's folder, so a node the test
+kills leaves no folder behind).
 
 ## Near real time
 

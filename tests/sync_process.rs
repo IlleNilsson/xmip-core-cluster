@@ -128,12 +128,18 @@ struct NodeProcess {
 }
 
 impl NodeProcess {
+    /// Node `name` started in a process of its own, its files in `at`. Its
+    /// temporary directory is `at` too — `TMP` is the first Windows reads,
+    /// `TMPDIR` the one Unix reads — so the folder its audit is written in
+    /// is removed with the cluster's: a node killed drops nothing.
     fn start(name: &str, at: &Path, port: u16) -> Self {
         let mut child = Command::new(std::env::current_exe().expect("this binary"))
             .args(["--exact", "node_process", "--nocapture", "--test-threads=1"])
             .env(NAME, name)
             .env(AT, at)
             .env(PORT, port.to_string())
+            .env("TMP", at)
+            .env("TMPDIR", at)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
