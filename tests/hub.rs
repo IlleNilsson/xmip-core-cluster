@@ -6,7 +6,7 @@
 //! from load is a defect (CONTRIBUTING.md).
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -15,6 +15,7 @@ use audit::keeper::settle;
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::Stage;
 use xcore::{PartyId, Severity};
 use xevent::Event;
@@ -24,10 +25,8 @@ use xmip_core_cluster::delivery::hub::Hub;
 use xmip_core_cluster::delivery::subscriber::{Subscriber, fixture};
 
 /// A directory of this test's own for the audit it writes.
-fn directory(name: &str) -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-event-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&at);
-    at
+fn directory(name: &str) -> Folder {
+    Folder::new(&format!("cluster-hub-{name}"))
 }
 
 fn subscriber(at: &Path) -> Subscriber {
@@ -82,7 +81,6 @@ fn a_subscription_receives_what_it_matches_and_the_delivery_is_audited() {
     drop(subscription);
     assert_eq!(hub.subscriptions(), 0, "dropping unsubscribes");
     assert!(audited(&at).contains("action = \"event.unsubscribe\""));
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -92,17 +90,13 @@ fn a_subscriber_the_gate_refuses_gets_no_subscription_and_the_refusal_is_audited
 
     let refused = closed.subscribe(subscriber(&at), Filter::everything(), 0);
 
-    let said = refused
-        .err()
-        .map(|error| error.to_string())
-        .unwrap_or_default();
+    let said = refused.err().map_or_default(|error| error.to_string());
     assert!(said.contains("no policy is configured"), "{said}");
     assert_eq!(closed.subscriptions(), 0);
     let audit = audited(&at);
     let warning = format!("severity = \"{}\"", Severity::Warning.word());
     assert!(audit.contains(&warning), "{audit}");
     assert!(audit.contains("no policy is configured"), "{audit}");
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -122,7 +116,6 @@ fn a_full_queue_refuses_counts_and_never_holds_the_publisher() {
     assert_eq!(delivery.events.len(), 2);
     assert_eq!(delivery.refused, 3);
     assert!(audited(&at).contains("3 matching Events refused"));
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -138,7 +131,6 @@ fn nothing_published_is_an_empty_delivery_after_the_timeout() {
 
     assert_eq!(delivery.events, [] as [Arc<Event>; 0]);
     assert!(started.elapsed() >= Duration::from_millis(20));
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -166,5 +158,4 @@ fn a_listener_is_called_back_on_its_own_thread_until_dropped() {
     assert_ne!(thread, publisher, "never on the publisher's thread");
     drop(listener);
     assert_eq!(hub.subscriptions(), 0, "dropping the listener unsubscribes");
-    let _ = fs::remove_dir_all(&at);
 }

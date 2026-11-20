@@ -5,7 +5,7 @@
 //! and what the hub holds is listed as a node publishes it.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -14,6 +14,7 @@ use audit::keeper::settle;
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::Stage;
 use observe::{Act, EventSubscription, PauseState};
 use party::{Party, PartyKind};
@@ -29,10 +30,8 @@ fn node() -> String {
     configure::fixture::test_cluster().node_scope(0)
 }
 
-fn directory(name: &str) -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-event-act-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&at);
-    at
+fn directory(name: &str) -> Folder {
+    Folder::new(&format!("cluster-act-{name}"))
 }
 
 fn subscriber(at: &Path) -> Subscriber {
@@ -66,7 +65,7 @@ fn a_paused_subscription_keeps_queuing_hands_nothing_over_and_counts_what_it_mis
     let operations = Party::new(PartyId::new(42), PartyKind::Service, "operations");
     let declared = fixture::subscriber(
         &operations,
-        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at))),
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&*at))),
     );
     let subscription = hub
         .subscribe(declared, Filter::everything(), 2)
@@ -110,7 +109,6 @@ fn a_paused_subscription_keeps_queuing_hands_nothing_over_and_counts_what_it_mis
     let audit = audited(&at);
     assert!(audit.contains("action = \"event.pause\""), "{audit}");
     assert!(audit.contains("\"by\" = \"ilian\""), "{audit}");
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -144,7 +142,6 @@ fn resuming_hands_over_what_queued_and_wakes_a_waiting_drain() {
     assert_eq!(hub.standing(&node())[0].state, PauseState::Active);
     assert!(audited(&at).contains("action = \"event.resume\""));
     drop(subscription);
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -175,7 +172,6 @@ fn removing_ends_it_its_holder_finds_it_closed_and_a_second_act_is_refused() {
         );
     }
     assert!(audited(&at).contains("action = \"event.remove\""));
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
@@ -195,5 +191,4 @@ fn removing_a_listened_subscription_ends_its_thread() {
         started.elapsed() < Duration::from_secs(1),
         "the thread had ended"
     );
-    let _ = fs::remove_dir_all(&at);
 }

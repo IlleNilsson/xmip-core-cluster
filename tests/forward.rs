@@ -3,7 +3,6 @@
 //! what was carried and what was given up on is audited.
 
 use std::fs;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,6 +10,7 @@ use audit::keeper::settle;
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::Stage;
 use resilience::Guard;
 use retry::Retry;
@@ -63,20 +63,14 @@ impl Wire for Shared {
     }
 }
 
-fn directory() -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-event-forward-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&at);
-    at
-}
-
 #[test]
 fn an_event_is_kept_until_the_wire_takes_it_and_arrives_in_order() {
-    let at = directory();
+    let at = Folder::new("cluster-forward");
     let party = PartyId::new(9);
     let hub = Hub::new(vec![Arc::new(PartyPolicy::new().allow(party))]);
     let subscriber = fixture::subscriber(
         &fixture::party(party),
-        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at))),
+        ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&*at))),
     );
     let subscription = hub
         .subscribe(subscriber, Filter::everything(), 0)
@@ -121,5 +115,4 @@ fn an_event_is_kept_until_the_wire_takes_it_and_arrives_in_order() {
     let audit = fs::read_to_string(at.join(audit::audit_store::FILE_NAME)).expect("audited");
     assert!(audit.contains("given up for now"), "{audit}");
     assert!(audit.contains("2 Events carried"), "{audit}");
-    let _ = fs::remove_dir_all(&at);
 }

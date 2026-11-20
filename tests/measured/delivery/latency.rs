@@ -19,8 +19,7 @@
 //! they measure the scheduler, and a 99th percentile held against the plain
 //! channel's failed for it.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -29,6 +28,7 @@ use std::time::{Duration, Instant};
 use audit::program_audit::ProgramAudit;
 use audit_file::FileSink;
 use authorize_party::PartyPolicy;
+use file::temporary::Folder;
 use node::Stage;
 use xcore::PartyId;
 use xcore::latency::{Rounds, spin};
@@ -44,12 +44,6 @@ const ROUNDS: usize = 500;
 
 /// What a publish wakes where a plain wake wakes one: the subscriber.
 const WAKES: u32 = 1;
-
-fn directory(name: &str) -> PathBuf {
-    let at = std::env::temp_dir().join(format!("xmip-event-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&at);
-    at
-}
 
 fn subscriber(at: &Path) -> Subscriber {
     fixture::subscriber(
@@ -112,7 +106,7 @@ fn hold(what: &str, taken: Vec<Duration>, published: Published, subscribing: &[D
 
 #[test]
 fn an_event_reaches_a_waiting_subscriber_within_a_millisecond() {
-    let at = directory("latency-next");
+    let at = Folder::new("cluster-latency-next");
     let hub = Arc::new(allowing());
     let subscription = hub
         .subscribe(subscriber(&at), Filter::everything(), 0)
@@ -151,12 +145,11 @@ fn an_event_reaches_a_waiting_subscriber_within_a_millisecond() {
 
     let (taken, subscribing) = receiver.join().expect("received");
     hold("publish to next", taken, published, &subscribing);
-    let _ = fs::remove_dir_all(&at);
 }
 
 #[test]
 fn an_event_reaches_a_listener_within_a_millisecond() {
-    let at = directory("latency-listen");
+    let at = Folder::new("cluster-latency-listen");
     let hub = allowing();
     let sent = Arc::new(Mutex::new(Vec::new()));
     let (tell, told) = mpsc::channel();
@@ -189,5 +182,4 @@ fn an_event_reaches_a_listener_within_a_millisecond() {
     drop(listener);
 
     hold("publish to callback", taken, published, &worked);
-    let _ = fs::remove_dir_all(&at);
 }

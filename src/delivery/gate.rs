@@ -45,35 +45,39 @@ mod tests {
     use audit::program_audit::ProgramAudit;
     use audit_file::FileSink;
     use authorize_party::PartyPolicy;
+    use file::temporary::Folder;
+    use std::path::Path;
     use xcore::PartyId;
 
     use super::*;
     use crate::delivery::subscriber::{Subscriber, fixture};
     use xevent::filter::Filter;
 
-    fn subscriber(party: u128) -> Subscriber {
-        let at = std::env::temp_dir().join("xmip-core-event-gate-tests");
+    fn subscriber(party: u128, at: &Path) -> Subscriber {
         fixture::subscriber(
             &fixture::party(PartyId::new(party)),
-            ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(&at))),
+            ProgramAudit::new("xmip-core-event tests", Some(FileSink::new(at))),
         )
     }
 
     #[test]
     fn a_subscriber_in_this_process_is_refused_until_a_policy_allows_its_party() {
+        let at = Folder::new("cluster-gate");
         let hub = Hub::new(Vec::new());
-        let refused = hub.subscribe(subscriber(7), Filter::everything(), 0);
+        let refused = hub.subscribe(subscriber(7, &at), Filter::everything(), 0);
         assert!(refused.is_err(), "being here admits nobody");
 
         hub.authorize_by(vec![Arc::new(PartyPolicy::new().allow(PartyId::new(7)))]);
         assert!(
-            hub.subscribe(subscriber(7), Filter::everything(), 0)
+            hub.subscribe(subscriber(7, &at), Filter::everything(), 0)
                 .is_ok()
         );
         assert!(
-            hub.subscribe(subscriber(8), Filter::everything(), 0)
+            hub.subscribe(subscriber(8, &at), Filter::everything(), 0)
                 .is_err(),
             "another Party in the same process is not allowed by it"
         );
+        drop(hub);
+        audit::keeper::settle();
     }
 }
