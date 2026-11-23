@@ -49,7 +49,7 @@ default = ["sync"]
 # Events delivered (ADR-0065): the hub, its subscribers and their gate, an
 # operator's acts, the forwarder, and the Event link's conversation
 # (`sync::link`) the hub keeps its taps and carriers by. It opens no
-# socket: the runtime and the Essentials take it without the plane.
+# socket: the runtime and the System Tests take it without the plane.
 delivery = [
     "dep:xevent",
     "dep:party",

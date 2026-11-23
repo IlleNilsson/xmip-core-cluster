@@ -40,7 +40,7 @@ it with `default-features = false`.
 The Event, its one subscription rule and its wire form are
 `xmip-core-event`'s. Delivering it to the subscribers that asked is this
 crate's, behind the feature `delivery`, on by default and included by
-`sync`; it opens no socket, so the runtime and the Essentials take it
+`sync`; it opens no socket, so the runtime and the System Tests take it
 without the plane (ADR-0065, amendment 2026-11-13).
 
 - **Who may see it.** A subscriber is a Party
