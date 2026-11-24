@@ -1,14 +1,16 @@
-//! Which node takes a piece of work (ADR-0056 clauses 3 and 4, amendment
-//! 2026-11-13).
+//! Which node takes a piece of work (ADR-0056 clauses 3 and 4, amendments
+//! 2026-11-13 and 2026-11-24).
 //!
-//! Placement is a match: among the nodes whose capability satisfies what
-//! the work requires ([`node::Capability::satisfies`]), the next in the
-//! rotation's turn takes it ([`place`]), or, for work every able node runs,
-//! each of them does ([`every`]). Where none does, the work is refused, and the
-//! refusal names both sides — the requirement that went unmet and every
-//! node considered, with what each declares — never placed somewhere that
-//! cannot serve it. Nothing is read from a node's name: a node is chosen by
-//! what it declares, and named only to say which one it was.
+//! Placement is a match: among the nodes whose declaration satisfies what
+//! the work requires ([`node::Capability::satisfies`]) — its stage served
+//! by a role, online where it must be, and every Node capability the work
+//! requires declared — the next in the rotation's turn takes it
+//! ([`place`]), or, for work every able node runs, each of them does
+//! ([`every`]). Where none does, the work is refused, and the refusal names
+//! both sides — the requirement that went unmet and every node considered,
+//! with what each declares — never placed somewhere that cannot serve it.
+//! Nothing is read from a node's name: a node is chosen by what it declares,
+//! and named only to say which one it was.
 
 use std::fmt;
 
@@ -46,6 +48,18 @@ impl Candidate for (String, Capability) {
     }
 }
 
+/// A candidate held by reference is the candidate: what a caller hands
+/// over in an order of its own.
+impl<T: Candidate + ?Sized> Candidate for &T {
+    fn node(&self) -> &str {
+        (**self).node()
+    }
+
+    fn capability(&self) -> &Capability {
+        (**self).capability()
+    }
+}
+
 /// Work no node could take: what it required, and every node considered
 /// with what it declared.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,6 +78,9 @@ impl fmt::Display for Unplaced {
         if self.considered.is_empty() {
             return f.write_str("none.");
         }
+        // A node's Node capabilities are said where it declares some, and
+        // where the work requires some that it lacks all of.
+        let naming = !self.requirement.required().is_empty();
         let considered: Vec<String> = self
             .considered
             .iter()
@@ -74,7 +91,12 @@ impl fmt::Display for Unplaced {
                 } else {
                     roles
                 };
-                format!("{node} ({declared}; {})", capability.word())
+                let named = match capability.declared() {
+                    [] if naming => "; declares none".to_string(),
+                    [] => String::new(),
+                    words => format!("; declares {}", words.join(", ")),
+                };
+                format!("{node} ({declared}{named})")
             })
             .collect();
         write!(f, "{}.", considered.join(", "))
@@ -114,7 +136,7 @@ pub fn every<C: Candidate>(
 ) -> Result<Vec<&C>, Unplaced> {
     let able: Vec<&C> = candidates
         .iter()
-        .filter(|candidate| candidate.capability().satisfies(requirement))
+        .filter(|candidate| candidate.capability().satisfies(&requirement))
         .collect();
     if able.is_empty() {
         return Err(Unplaced {
@@ -156,7 +178,7 @@ mod tests {
         let receive = Requirement::serving(Stage::Receive);
         let placed: Vec<&str> = (0..4)
             .map(|_| {
-                place(receive, &nodes, &rotation)
+                place(receive.clone(), &nodes, &rotation)
                     .expect("placed")
                     .0
                     .as_str()
@@ -172,7 +194,7 @@ mod tests {
     fn a_node_is_chosen_by_what_it_declares_and_renaming_changes_nothing() {
         let mut nodes = nodes(&[&[NodeRole::Sending], &[NodeRole::Receiving]]);
         let receive = Requirement::serving(Stage::Receive);
-        let chosen = place(receive, &nodes, &Rotation::new()).expect("placed");
+        let chosen = place(receive.clone(), &nodes, &Rotation::new()).expect("placed");
         assert_eq!(chosen.1, Capability::of(&[NodeRole::Receiving]));
         nodes.swap(0, 1);
         let (first, second) = (nodes[0].0.clone(), nodes[1].0.clone());
@@ -185,15 +207,15 @@ mod tests {
     #[test]
     fn work_no_node_satisfies_is_refused_naming_both_sides() {
         let nodes = nodes(&[&[NodeRole::Receiving], &[]]);
-        let send = Requirement::serving(Stage::Send).with_online(true);
-        let refused = place(send, &nodes, &Rotation::new()).expect_err("no node sends");
+        let send = Requirement::serving(Stage::Send);
+        let refused = place(send.clone(), &nodes, &Rotation::new()).expect_err("no node sends");
         assert_eq!(refused.requirement, send);
         assert_eq!(refused.considered, nodes);
         assert_eq!(
             refused.to_string(),
             format!(
-                "REFUSED: no node satisfies work requiring serving Send, online; considered \
-                 {} (receiving; offline), {} (no role; offline).",
+                "REFUSED: no node satisfies work requiring serving Send; considered \
+                 {} (receiving), {} (no role).",
                 nodes[0].0, nodes[1].0
             )
         );
@@ -211,13 +233,13 @@ mod tests {
             &[NodeRole::Executing],
         ]);
         let process = Requirement::serving(Stage::Process);
-        let on: Vec<&str> = every(process, &nodes)
+        let on: Vec<&str> = every(process.clone(), &nodes)
             .expect("placed")
             .into_iter()
             .map(|node| node.0.as_str())
             .collect();
         assert_eq!(on, [nodes[1].0.as_str(), nodes[3].0.as_str()]);
-        let refused = every(process, &nodes[..1]).expect_err("no node processes");
+        let refused = every(process.clone(), &nodes[..1]).expect_err("no node processes");
         assert_eq!(
             refused,
             place(process, &nodes[..1], &Rotation::new()).expect_err("the same refusal")
@@ -230,18 +252,87 @@ mod tests {
         );
     }
 
+    /// Online is a Node capability: work requiring it goes only to a node
+    /// declaring it (ADR-0056, amendment 2026-11-24).
     #[test]
-    fn online_work_goes_only_to_an_online_node() {
+    fn online_work_goes_only_to_a_node_declaring_online() {
         let mut nodes = nodes(&[&[NodeRole::Sending], &[NodeRole::Sending]]);
-        nodes[1].1 = nodes[1].1.clone().with_online(true);
+        let online = [node::ONLINE.to_string()];
+        nodes[1].1 = nodes[1].1.clone().with_declared(&online).expect("a word");
         let rotation = Rotation::new();
-        let send = Requirement::serving(Stage::Send).with_online(true);
+        let send = Requirement::serving(Stage::Send)
+            .requiring(&online)
+            .expect("a word");
         for _ in 0..3 {
             assert_eq!(
-                place(send, &nodes, &rotation).expect("placed").0,
+                place(send.clone(), &nodes, &rotation).expect("placed").0,
                 nodes[1].0
             );
         }
+        let refused = place(send, &nodes[..1], &rotation).expect_err("offline");
+        assert_eq!(
+            refused.to_string(),
+            format!(
+                "REFUSED: no node satisfies work requiring serving Send, online; considered \
+                 {} (sending; declares none).",
+                nodes[0].0
+            )
+        );
+    }
+
+    /// Work requiring Node capabilities goes only to the nodes declaring
+    /// each of them, and where none does the refusal says what every node
+    /// considered declares (ADR-0056, amendment 2026-11-24).
+    #[test]
+    fn work_requiring_node_capabilities_goes_only_to_a_node_declaring_them() {
+        let words = |said: &[&str]| said.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let mut nodes = nodes(&[
+            &[NodeRole::Processing],
+            &[NodeRole::Executing],
+            &[NodeRole::Processing],
+        ]);
+        let module = words(&["order-approval-module"]);
+        nodes[2].1 = nodes[2].1.clone().with_declared(&module).expect("a word");
+        nodes[1].1 = nodes[1]
+            .1
+            .clone()
+            .with_declared(&words(&["erp-direct"]))
+            .expect("a word");
+        let approval = Requirement::serving(Stage::Process)
+            .requiring(&words(&["order-approval-module"]))
+            .expect("a word");
+        let on: Vec<&str> = every(approval.clone(), &nodes)
+            .expect("placed")
+            .into_iter()
+            .map(|node| node.0.as_str())
+            .collect();
+        assert_eq!(on, [nodes[2].0.as_str()]);
+        let rotation = Rotation::new();
+        for _ in 0..3 {
+            let chosen = place(approval.clone(), &nodes, &rotation).expect("placed");
+            assert_eq!(chosen.0, nodes[2].0);
+        }
+        let refused = every(approval, &nodes[..2]).expect_err("none declares it");
+        assert_eq!(
+            refused.to_string(),
+            format!(
+                "REFUSED: no node satisfies work requiring serving Work Process, \
+                 order-approval-module; considered {} (processing; declares none), \
+                 {} (executing; declares erp-direct).",
+                nodes[0].0, nodes[1].0
+            )
+        );
+        let by_reference: Vec<&(String, Capability)> = nodes.iter().rev().collect();
+        let chosen = place(
+            Requirement::serving(Stage::Process),
+            &by_reference,
+            &Rotation::new(),
+        );
+        assert_eq!(
+            chosen.expect("placed").0,
+            nodes[2].0,
+            "in the order handed over"
+        );
     }
 
     #[test]

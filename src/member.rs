@@ -22,7 +22,8 @@ pub struct Member {
     /// empty string (ADR-0067: no node starts its sync listener yet).
     pub address: Option<String>,
     /// What it declares: its roles, and so the stages it serves, and its
-    /// online capability (ADR-0056).
+    /// Node capabilities, `online` among them where it has the internet
+    /// (ADR-0056, amendment 2026-11-24).
     pub capability: Capability,
     /// Where its operate listener answers on the network, `host:port`, or
     /// `None` where it serves none (ADR-0067, `[operate] listen`).
@@ -65,7 +66,9 @@ mod tests {
         let member = Member {
             node: cluster.node_scope(0),
             address: Some("127.0.0.1:7400".to_string()),
-            capability: Capability::of(&[NodeRole::Receiving]).with_online(true),
+            capability: Capability::of(&[NodeRole::Receiving])
+                .with_declared(&[node::ONLINE.to_string()])
+                .expect("a Node capability"),
             operate: None,
             storage_place: None,
             stopped: None,
@@ -73,6 +76,10 @@ mod tests {
         let membership: Box<dyn Membership> = Box::new(Listed(vec![member.clone()]));
         let members = membership.members().expect("listed");
         assert_eq!(members, [member]);
-        assert!(members[0].capability.is_online());
+        assert!(
+            members[0]
+                .capability
+                .satisfies(&node::Requirement::online())
+        );
     }
 }

@@ -13,11 +13,15 @@ of the cluster takes. Platform since 2026-11-13, mounted at
   follower of the members takes (`deployment-model.md` section 7; ADR-0065,
   amendment 2026-10-02).
 - **`place`** — placement is a match (ADR-0056 clause 4): among the
-  candidates whose capability satisfies a `node::Requirement`, the next in
-  the rotation's turn takes the work; where none does it is refused,
-  `Unplaced`, naming the requirement and every node considered. A
-  `Candidate` is a member, or a node of a cluster's file with what it
-  declares. Nothing reads a name. **`every`** is the same match for work
+  candidates whose capability satisfies a `node::Requirement` — its stage
+  served by a role, and every Node capability it requires declared, `online`
+  among them where it reaches off the machine (amendment 2026-11-24) — the
+  next in the rotation's turn takes the work, in the order the candidates
+  are given; where none does it is refused, `Unplaced`, naming the
+  requirement and every node considered, and what each declares of the Node
+  capabilities where the work requires some. A `Candidate` is a member, or
+  a node of a cluster's file with what it declares, or either held by
+  reference. Nothing reads a name. **`every`** is the same match for work
   each able node runs, a Work Process on every node serving its stage, its
   turns shared through Xmip Storage; it refuses as `place` does.
 - **`Rotation`** — where the next turn starts: one atomic step a turn, each
