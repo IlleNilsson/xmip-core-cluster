@@ -1,8 +1,8 @@
 [package]
 name = "xmip-core-cluster"
-version = "0.1.0"
-edition = "2024"
-license = "AGPL-3.0-or-later"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 repository = "https://github.com/IlleNilsson/xmip-core-cluster"
 description = "The Xmip Cluster: its members, the placement of work on the nodes whose capability satisfies it, the one rotation every round robin takes, the delivery of Events to the subscribers that asked for them, and the sync plane that links its nodes (ADR-0058, ADR-0065, ADR-0067)."
 
@@ -135,13 +135,5 @@ audit-file = { package = "xmip-core-audit-file", git = "https://github.com/IlleN
 # A test cluster's authority and each node's certificate. Test-only.
 rcgen = "0.14"
 
-[lints.rust]
-unsafe_code = "forbid"
-
-[lints.clippy]
-too_many_lines = "warn"
-pedantic = { level = "warn", priority = -1 }
-missing_errors_doc = "warn"
-missing_panics_doc = "warn"
-unwrap_used = "warn"
-expect_used = "allow"
+[lints]
+workspace = true
